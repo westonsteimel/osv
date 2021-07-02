@@ -40,6 +40,11 @@ type pypiVersions struct {
 	Versions []string `json:"versions"`
 }
 
+type pypiCPEs struct {
+	Name string   `json:name`
+	CPEs []string `json:cpes`
+}
+
 type PyPI struct {
 	// links is a map of link -> array of packages with that link referenced somewhere on PyPI.
 	links map[string][]string
@@ -49,6 +54,8 @@ type PyPI struct {
 	vendorProductToPkg map[string][]string
 	// checkedPackages is a cache that stores whether a package still exists on PyPI.
 	checkedPackages map[string]bool
+	// cpeMatchString to package names
+	cpeToPkg map[string][]string
 }
 
 const (
@@ -109,6 +116,17 @@ func loadVersions(path string) []pypiVersions {
 		log.Fatalf("Failed to parse %s: %v", err)
 	}
 	return versions
+}
+
+func loadCPEs(path string) []pypiCPEs {
+	data := readOrPanic(path)
+
+	var cpes []pypiCPEs
+	err := json.Unmarshal(data, &cpes)
+	if err != nil {
+		log.Fatalf("Failed to parse %s: %v", err)
+	}
+	return cpes
 }
 
 // NormalizePackageName normalizes a PyPI package name.
@@ -213,6 +231,18 @@ func processLinks(linksSource []pypiLinks) (map[string][]string, map[string][]st
 	return processedLinks, vendorProductToPkg
 }
 
+func processCPEs(cpesSource []pypiCPEs) map[string][]string {
+	cpeToPkg := map[string][]string{}
+
+	for _, pkg := range cpesSource {
+		for _, cpe := range pkg.CPEs {
+			cpeToPkg[cpe] = append(cpeToPkg[cpe], pkg.Name)
+		}
+	}
+
+	return cpeToPkg
+}
+
 // processVersions takes a pypi_versions.json and returns a map of packages to versions.
 func processVersions(versionsSource []pypiVersions) map[string][]string {
 	versions := map[string][]string{}
@@ -222,9 +252,10 @@ func processVersions(versionsSource []pypiVersions) map[string][]string {
 	return versions
 }
 
-func New(pypiLinksPath string, pypiVersionsPath string) *PyPI {
+func New(pypiLinksPath string, pypiVersionsPath string, pypiCPEsPath string) *PyPI {
 	linksSource := loadLinks(pypiLinksPath)
 	versionsSource := loadVersions(pypiVersionsPath)
+	cpesSource := loadCPEs(pypiCPEsPath)
 
 	links, vendorProductToPkg := processLinks(linksSource)
 	return &PyPI{
@@ -232,6 +263,7 @@ func New(pypiLinksPath string, pypiVersionsPath string) *PyPI {
 		versions:           processVersions(versionsSource),
 		checkedPackages:    map[string]bool{},
 		vendorProductToPkg: vendorProductToPkg,
+		cpeToPkg:           processCPEs(cpesSource),
 	}
 }
 
@@ -264,19 +296,35 @@ func (p *PyPI) Matches(cve cves.CVEItem, falsePositives *triage.FalsePositives) 
 		return processMatches(matches)
 	}
 
-	cpe := strings.Split(cpes[0], ":")
-	if len(cpe) < 5 {
-		return processMatches(matches)
-	}
+	for _, cpe := range cpes {
+		components := strings.Split(cpe, ":")
 
-	vendorProduct := cpe[3] + "/" + cpe[4]
-	if pkgs, exists := p.vendorProductToPkg[vendorProduct]; exists {
-		for _, pkg := range pkgs {
-			if p.finalPkgCheck(cve.CVE, pkg, falsePositives) {
-				matches = append(matches, pkg)
+		if len(components) > 10 {
+			cpeString := components[2] + ":" + components[3] + ":" + components[4] + ":" + components[10]
+
+			if pkgs, exists := p.cpeToPkg[cpeString]; exists {
+				for _, pkg := range pkgs {
+					if p.finalPkgCheck(cve.CVE, pkg, falsePositives) {
+						matches = append(matches, pkg)
+					}
+				}
+			}
+		}
+
+		if len(components) < 5 {
+			return processMatches(matches)
+		}
+
+		vendorProduct := components[3] + "/" + components[4]
+		if pkgs, exists := p.vendorProductToPkg[vendorProduct]; exists {
+			for _, pkg := range pkgs {
+				if p.finalPkgCheck(cve.CVE, pkg, falsePositives) {
+					matches = append(matches, pkg)
+				}
 			}
 		}
 	}
+
 	return processMatches(matches)
 }
 

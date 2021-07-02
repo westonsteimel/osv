@@ -77,6 +77,7 @@ func main() {
 	jsonPath := flag.String("nvd_json", "", "Path to NVD CVE JSON.")
 	pypiLinksPath := flag.String("pypi_links", "", "Path to pypi_links.json.")
 	pypiVersionsPath := flag.String("pypi_versions", "", "Path to pypi_versions.json.")
+	pypiCpesPath := flag.String("pypi_cpes", "", "Path to pypi_cpes.json.")
 	falsePositivesPath := flag.String("false_positives", "", "Path to false positives file.")
 	withoutNotes := flag.Bool("without_notes", false, "Output vulnerabilities without notes only.")
 	outDir := flag.String("out_dir", "", "Path to output results.")
@@ -99,7 +100,7 @@ func main() {
 		log.Fatalf("Failed to load false positives file %s: %v", *falsePositivesPath, err)
 	}
 
-	ecosystem := pypi.New(*pypiLinksPath, *pypiVersionsPath)
+	ecosystem := pypi.New(*pypiLinksPath, *pypiVersionsPath, *pypiCpesPath)
 	existingIDs, err := loadExisting(*outDir)
 	if err != nil {
 		log.Fatalf("Failed to load existing IDs: %v", err)
