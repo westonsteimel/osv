@@ -304,7 +304,7 @@ func (p *PyPI) Matches(cve cves.CVEItem, falsePositives *triage.FalsePositives) 
 
 			if pkgs, exists := p.cpeToPkg[cpeString]; exists {
 				for _, pkg := range pkgs {
-					if p.finalPkgCheck(cve.CVE, pkg, falsePositives) {
+					if p.finalPkgCheck(cve.CVE, pkg, falsePositives, false) {
 						matches = append(matches, pkg)
 					}
 				}
@@ -318,7 +318,7 @@ func (p *PyPI) Matches(cve cves.CVEItem, falsePositives *triage.FalsePositives) 
 		vendorProduct := components[3] + "/" + components[4]
 		if pkgs, exists := p.vendorProductToPkg[vendorProduct]; exists {
 			for _, pkg := range pkgs {
-				if p.finalPkgCheck(cve.CVE, pkg, falsePositives) {
+				if p.finalPkgCheck(cve.CVE, pkg, falsePositives, true) {
 					matches = append(matches, pkg)
 				}
 			}
@@ -382,21 +382,25 @@ func (p *PyPI) packageExists(pkg string) bool {
 	return result
 }
 
-func (p *PyPI) finalPkgCheck(cve cves.CVE, pkg string, falsePositives *triage.FalsePositives) bool {
+func (p *PyPI) finalPkgCheck(cve cves.CVE, pkg string, falsePositives *triage.FalsePositives, checkDescription bool) bool {
 	// To avoid false positives, check that the pkg name is mentioned in the description.
 	desc := strings.ToLower(cves.EnglishDescription(cve))
-	pkgNameParts := strings.Split(pkg, "-")
 
-	for _, part := range pkgNameParts {
-		// Python packages can commonly be py<name> or <name>-py.
-		// Remove this to be a bit more lenient when matching against the description.
-		part = strings.TrimPrefix(part, "py")
-		part = strings.TrimSuffix(part, "py")
-		if !strings.Contains(desc, strings.ToLower(part)) {
-			return false
+	if checkDescription {
+		pkgNameParts := strings.Split(pkg, "-")
+
+		for _, part := range pkgNameParts {
+			// Python packages can commonly be py<name> or <name>-py.
+			// Remove this to be a bit more lenient when matching against the description.
+			part = strings.TrimPrefix(part, "py")
+			part = strings.TrimSuffix(part, "py")
+			if !strings.Contains(desc, strings.ToLower(part)) {
+				return false
+			}
 		}
+
+		log.Printf("Matched description for %s", pkg)
 	}
-	log.Printf("Matched description for %s", pkg)
 
 	if falsePositives.CheckPackage(pkg) && !strings.Contains(desc, "python") {
 		// If this package is listed as a false positive, and the description does not
@@ -433,7 +437,7 @@ func (p *PyPI) matchesPackage(link string, cve cves.CVE, falsePositives *triage.
 		// Check that the package still exists on PyPI.
 		for _, pkg := range candidates {
 			log.Printf("Got potential match for %s: %s", fullURL, pkg)
-			if p.finalPkgCheck(cve, pkg, falsePositives) {
+			if p.finalPkgCheck(cve, pkg, falsePositives, true) {
 				pkgs = append(pkgs, pkg)
 			}
 		}
